@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from PIL import Image
 from pdf2image import convert_from_path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import pytesseract
 import Levenshtein
 
@@ -93,35 +94,50 @@ def _create_json_entry(file_path, values, bboxes):
     
     return entry
 
+def process_single_file(path, temp_dir):
+    """
+    Process a single file, extracting text and saving information.
+    """
+    full_path = os.path.abspath(path)
+    data = []
+    if path.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp')):
+        values, bboxes = _extract_and_save_information(full_path)
+        data.append(_create_json_entry(full_path, values, bboxes))
+    elif path.lower().endswith('.pdf'):
+        pages = convert_from_path(full_path, 350)
+        for i, page in enumerate(pages, start=1):
+            image_name = f"{_get_image_name(path)}_page_{i}.jpg"
+            image_path = os.path.join(temp_dir, image_name)
+            page.save(image_path, "JPEG")
+            values, bboxes = _extract_and_save_information(image_path)
+            data.append(_create_json_entry(image_path, values, bboxes))
+    return data
 
 def process_files(files):
     """
-    Process a list of files, extracting text and saving information.
+    Process a list of files, extracting text and saving information using multithreading.
     """
-
-    data = []
     temp_dir = "./temp"
     os.makedirs(temp_dir, exist_ok=True)
+    data = []
 
-    for path in files:
-        full_path = os.path.abspath(path)
-        if path.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp')):
-            values, bboxes = _extract_and_save_information(full_path)
-            data.append(_create_json_entry(full_path, values, bboxes))
-        elif path.lower().endswith('.pdf'):
-            pages = convert_from_path(full_path, 350)
-            for i, page in enumerate(pages, start=1):
-                image_name = f"{_get_image_name(path)}_page_{i}.jpg"
-                image_path = os.path.join(temp_dir, image_name)
-                page.save(image_path, "JPEG")
-                values, bboxes = _extract_and_save_information(image_path)
-                data.append(_create_json_entry(image_path, values, bboxes))
-        elif os.path.isdir(path):
-            file_paths = [os.path.join(path, filename) for filename in os.listdir(path)]
-            return process_files(file_paths)
-    
-    with open('document_information.json', 'w') as json_file:
-        if len(data) != 0 :
+    # Flatten all files and directories into a list of files
+    all_files = []
+    for file_or_dir in files:
+        if os.path.isdir(file_or_dir):
+            for root, _, filenames in os.walk(file_or_dir):
+                for filename in filenames:
+                    all_files.append(os.path.join(root, filename))
+        else:
+            all_files.append(file_or_dir)
+
+    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+        futures = [executor.submit(process_single_file, file, temp_dir) for file in all_files]
+        for future in as_completed(futures):
+            data.extend(future.result())
+
+    if data:
+        with open('document_information.json', 'w') as json_file:
             json.dump(data, json_file, indent=4)
 
 

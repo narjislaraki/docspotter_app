@@ -5,6 +5,11 @@ from document_processing import *
 
 ############################### GUI FUNCTIONS ############################### 
 
+def show_processing_popup():
+    layout = [[sg.Text('Processing files, please wait...')]]
+    window = sg.Window('Processing', layout, finalize=True)
+    return window
+
 def open_image(image_path):
 
     image_path = resize_image_for_display(image_path)
@@ -147,7 +152,12 @@ while True:
         files = open_explorer(path='C:/', width=80)
         if files:
             print("Processing images..")
-            process_files(files) #TODO -> multithreading
+            window_process = show_processing_popup()  # Show the popup
+            #import time
+            #start_time = time.time()
+            process_files(files)
+            window_process.close()  # Close the popup after processing is complete
+            #print("--- %s seconds ---" % (time.time() - start_time))
             print("Processing done, saving to json file.")
     elif event == 'Search':
         # Check if fields are valid 

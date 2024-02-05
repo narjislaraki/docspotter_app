@@ -100,7 +100,7 @@ def _process_single_file(path, temp_dir):
     """
     full_path = os.path.abspath(path)
     data = []
-    if path.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.webp')):
+    if path.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp')):
         values, bboxes = _extract_and_save_information(full_path)
         data.append(_create_json_entry(full_path, values, bboxes))
     elif path.lower().endswith('.pdf'):

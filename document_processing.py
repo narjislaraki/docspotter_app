@@ -3,6 +3,7 @@ import json
 import os
 import re
 from pathlib import Path
+from PIL import Image
 from pdf2image import convert_from_path
 import pytesseract
 import Levenshtein
@@ -11,6 +12,9 @@ pytesseract.pytesseract.tesseract_cmd = r'E:\Program Files\Tesseract-OCR\tessera
 
 
 # Utility Functions 
+
+def _get_image_name(path):
+    return Path(path).stem
 
 def is_float(value):
     """
@@ -39,8 +43,19 @@ def _preprocess_image(image_path):
 
     return image
 
-
-
+def resize_image_for_display(image_path, max_size=(700, 700)):
+    """
+    Resize an image to fit within a window, maintaining aspect ratio.
+    :param image_path: Path to the image file
+    :param max_size: Maximum size (width, height) for the image to fit within
+    :return: Path to the resized image
+    """
+    with Image.open(image_path) as img:
+        img.thumbnail(max_size, Image.LANCZOS)
+        resized_image_path = f"./temp/{_get_image_name(image_path)}.png"
+        img.save(resized_image_path)
+    return resized_image_path
+    
 # Main OCR and Image Processing Functions
 
 def _extract_and_save_information(image_path):
@@ -96,7 +111,7 @@ def process_files(files):
         elif path.lower().endswith('.pdf'):
             pages = convert_from_path(full_path, 350)
             for i, page in enumerate(pages, start=1):
-                image_name = f"{Path(path).stem}_page_{i}.jpg"
+                image_name = f"{_get_image_name(path)}_page_{i}.jpg"
                 image_path = os.path.join(temp_dir, image_name)
                 page.save(image_path, "JPEG")
                 values, bboxes = _extract_and_save_information(image_path)
@@ -138,7 +153,7 @@ def draw_bounding_boxes(selected_data):
     annotated_image = cv2.imread(path)
     left, top, right, bottom = bbox
     cv2.rectangle(annotated_image, (left, top), (right, bottom), (0, 0, 255), 2)
-    new_image_path = f"./temp/{Path(path).stem}.png"
+    new_image_path = f"./temp/{_get_image_name(path)}.png"
     cv2.imwrite(new_image_path, annotated_image)
 
     return new_image_path

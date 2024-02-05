@@ -6,13 +6,15 @@ from document_processing import *
 ############################### GUI FUNCTIONS ############################### 
 
 def open_image(image_path):
+
+    image_path = resize_image_for_display(image_path)
     # Create a window to display an image
     layout = [
-        [sg.Image(size=(300,300), filename=image_path)],
+        [sg.Image(filename=image_path)],
         [sg.Button("Close")]
     ]
 
-    window = sg.Window("Image Viewer", layout, finalize=True)
+    window = sg.Window(image_path, layout, finalize=True)
 
     while True:
         event, values = window.read()

@@ -1,48 +1,54 @@
-import pytesseract
 import cv2
-import os
-from PIL import Image
-from pdf2image import convert_from_path
-import numpy as np
 import json
-from pathlib import Path
+import os
 import re
+from pathlib import Path
+from pdf2image import convert_from_path
+import pytesseract
+import Levenshtein
 
 pytesseract.pytesseract.tesseract_cmd = r'E:\Program Files\Tesseract-OCR\tesseract.exe'
 
+
+# Utility Functions 
+
+def is_float(value):
+    """
+    Check if the value can be converted to a float.
+    """
+    try:
+        float(value)
+        return True
+    except ValueError:
+        return False
+
 def _has_numbers(string):
+    """
+    Check if the string contains any number.
+    """
     return bool(re.search(r'\d', string))
+
 
 def _preprocess_image(image_path):
     """
-    This method is used before applying an OCR tool in order to have a better extraction
+    Preprocess the image for better OCR results.
     """
-    print(image_path)
-    # Transform to grayscale
+    # Read the image and convert to grayscale
     image = cv2.imread(image_path)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    
-    # Noise removal
-    # image = cv2.medianBlur(image,5)
-    """
-    # Thresholding
-    image = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1] # Or use adaptive threshold ?
-    
-    # dilation
-    kernel = np.ones((5,5),np.uint8)
-    image = cv2.dilate(image, kernel, iterations = 1)
-    """
-    
+
     return image
 
 
+
+# Main OCR and Image Processing Functions
+
 def _extract_and_save_information(image_path):
     """
-    Extract words and calculate bounding boxes of an image
+    Extract words and calculate bounding boxes from an image.
     """
 
     image = _preprocess_image(image_path)
-
     d =  pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
 
     # Extract words and bounding boxes
@@ -61,46 +67,78 @@ def _extract_and_save_information(image_path):
 
     return values, bboxes
 
+
 def _create_json_entry(file_path, values, bboxes):
+    """
+    Create a JSON entry for the processed file.
+    """
     entry = {"index": file_path,
             "values": values,
             "bounding_boxes": bboxes }
     
     return entry
 
+
 def process_files(files):
+    """
+    Process a list of files, extracting text and saving information.
+    """
+
     data = []
-    if not os.path.exists("./temp"):
-        os.makedirs("./temp")
-    print("Processing images..")
+    temp_dir = "./temp"
+    os.makedirs(temp_dir, exist_ok=True)
+
+    for path in files:
+        full_path = os.path.abspath(path)
+        if path.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp')):
+            values, bboxes = _extract_and_save_information(full_path)
+            data.append(_create_json_entry(full_path, values, bboxes))
+        elif path.lower().endswith('.pdf'):
+            pages = convert_from_path(full_path, 350)
+            for i, page in enumerate(pages, start=1):
+                image_name = f"{Path(path).stem}_page_{i}.jpg"
+                image_path = os.path.join(temp_dir, image_name)
+                page.save(image_path, "JPEG")
+                values, bboxes = _extract_and_save_information(image_path)
+                data.append(_create_json_entry(image_path, values, bboxes))
+        elif os.path.isdir(path):
+            file_paths = [os.path.join(path, filename) for filename in os.listdir(path)]
+            return process_files(file_paths)
+    
     with open('document_information.json', 'w') as json_file:
+        if len(data) != 0 :
+            json.dump(data, json_file, indent=4)
 
-        for path in files:
-            full_path = os.path.abspath(path)
-            
-            if path.endswith((".jpg", ".jpeg", ".png", ".bmp")):
-                values, bboxes = _extract_and_save_information(full_path)
-                entry = _create_json_entry(full_path, values, bboxes)
-                data.append(entry)
 
-            elif path.endswith('.pdf'):
-                pages = convert_from_path(full_path, 350)
-                i = 1
-                for page in pages:
-                    image_name = Path(path).stem + "_page_" + str(i) + ".jpg" 
-                    image_path = os.path.join("./temp/", image_name)
-                    page.save(image_path, "JPEG")
-                    values, bboxes = _extract_and_save_information(image_path)
-                    entry = _create_json_entry(image_path, values, bboxes)
-                    data.append(entry)
-                    i = i+1    
-            elif os.path.isdir(path):
-                    file_paths = [os.path.join(path, filename) for filename in os.listdir(path)]
-                    print(file_paths[0])
-                    process_files(file_paths)
-                    
-            else: 
-                pass
-        
-        print("Processing done, saving to json file.")
-        json.dump(data, json_file, indent=4)
+
+def find_closest_values(user_input, threshold):
+    with open('document_information.json', 'r') as json_file:
+        data = json.load(json_file)
+
+    closest_values = []
+
+    for entry in data:
+        for i, extracted_value in enumerate(entry['values']):
+            distance = Levenshtein.distance(user_input, extracted_value)
+            if distance <= threshold:
+                closest_values.append({
+                    'value': extracted_value,
+                    'distance': distance,
+                    'image_path': entry['index'],
+                    'bounding_box': entry['bounding_boxes'][i]
+                })
+    return closest_values
+
+
+def draw_bounding_boxes(selected_data):
+    """
+    Draw around the specified data on the image.
+    """
+    path, value, bbox = selected_data['image_path'], selected_data['value'], selected_data['bounding_box']
+    annotated_image = cv2.imread(path)
+    left, top, right, bottom = bbox
+    cv2.rectangle(annotated_image, (left, top), (right, bottom), (0, 0, 255), 2)
+    new_image_path = f"./temp/{Path(path).stem}.png"
+    cv2.imwrite(new_image_path, annotated_image)
+
+    return new_image_path

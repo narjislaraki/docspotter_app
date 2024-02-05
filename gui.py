@@ -1,40 +1,33 @@
 
 from pathlib import Path
 import PySimpleGUI as sg
-import sys 
-import os 
-from document_processing import process_files
-import json 
-import Levenshtein
-############################### FUNCTIONS ############################### 
+from document_processing import *
 
-def find_closest_values(user_input, threshold):
-    with open('document_information.json', 'r') as json_file:
-        data = json.load(json_file)
+############################### GUI FUNCTIONS ############################### 
 
-    closest_values = []
+def open_image(image_path):
+    # Create a window to display an image
+    layout = [
+        [sg.Image(size=(300,300), filename=image_path)],
+        [sg.Button("Close")]
+    ]
 
-    for entry in data:
-        values = entry['values']
-        path = entry['index']
-        i = 0
-        for extracted_value in values:
-            distance = Levenshtein.distance(user_input, extracted_value)
-            if distance <= threshold:
-                closest_values.append({
-                'value': extracted_value,
-                'distance': distance,
-                'image_path': path,
-                'bounding_box': entry['bounding_boxes'][i]
-            })
-            
-            i = i+1
-    
-    return closest_values
+    window = sg.Window("Image Viewer", layout, finalize=True)
 
-# This section (file and folder browsing) was written by Jason Yang (@jason990420)
-def popup_paths(path=Path.home(), width=60):
+    while True:
+        event, values = window.read()
 
+        if event == sg.WIN_CLOSED or event == "Close":
+            break
+
+    window.close()
+
+
+def open_explorer(path=Path.home(), width=60):
+    """
+    Function to open a file/folder explorer and select files or directories
+    This section was written by Jason Yang (@jason990420)
+    """
     def short(file, width):
         return file[:width//2-3] + '...' + file[-width//2:] if len(file)>width else file
 
@@ -83,38 +76,54 @@ def popup_paths(path=Path.home(), width=60):
             break
     return result
 
-def is_float(value):
-    try:
-        float(value)
-        return True
-    except ValueError:
-        return False
-    
-def open_window(closest_values):
+
+def open_search_results(closest_values):
+    # Function to open the search results window and display closest values
     layout = [
-            [sg.Text("Search Results:")],
-            [sg.Listbox(values=[f"Value: {item['value']} (Distance: {item['distance']})" for item in closest_values], size=(50,6))],
-            [sg.Button("Show Image")],
-            [sg.Button("Back to Search")]
+            [sg.Text("Search Results:"), sg.Button("See Document", key="see_document")],
+            [sg.Listbox(
+                values=[f"Value: {item['value']} (Distance: {item['distance']})" for item in closest_values],
+            size=(50, 6),
+            enable_events=True,
+            key="result_list", 
+            select_mode = 'single')],
+            [sg.Button("Back", key="back")]
         ]
 
     window = sg.Window('Search Results', layout)
-    
+    listbox = window['result_list']
+    selected_item_key = None
+
     while True:
         event, values = window.read()
-        if event == "Back to Search" or event == sg.WINDOW_CLOSED:
+        if event == "back" or event == sg.WINDOW_CLOSED:
             break
+        elif event == 'see_document':
+            # Retrieve the associated data or key from the dictionary  
+            selected_data =  closest_values[selected_item_key]
+            new_image_path = draw_bounding_boxes(selected_data)
+            if selected_data:
+                open_image(new_image_path)
+
+        elif event == 'result_list':
+            # Handle button clicks for opening documents
+            selected_item = values.get('result_list')
+            if selected_item:
+                    selected_item_key = listbox.get_indexes()[0]
+    
     window.close()
     
-############################### MAIN ############################### 
-
+############################ MAIN #######################
+    
+# Define icons for buttons
 folder_icon = b'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAACXBIWXMAAAsSAAALEgHS3X78AAABnUlEQVQ4y8WSv2rUQRSFv7vZgJFFsQg2EkWb4AvEJ8hqKVilSmFn3iNvIAp21oIW9haihBRKiqwElMVsIJjNrprsOr/5dyzml3UhEQIWHhjmcpn7zblw4B9lJ8Xag9mlmQb3AJzX3tOX8Tngzg349q7t5xcfzpKGhOFHnjx+9qLTzW8wsmFTL2Gzk7Y2O/k9kCbtwUZbV+Zvo8Md3PALrjoiqsKSR9ljpAJpwOsNtlfXfRvoNU8Arr/NsVo0ry5z4dZN5hoGqEzYDChBOoKwS/vSq0XW3y5NAI/uN1cvLqzQur4MCpBGEEd1PQDfQ74HYR+LfeQOAOYAmgAmbly+dgfid5CHPIKqC74L8RDyGPIYy7+QQjFWa7ICsQ8SpB/IfcJSDVMAJUwJkYDMNOEPIBxA/gnuMyYPijXAI3lMse7FGnIKsIuqrxgRSeXOoYZUCI8pIKW/OHA7kD2YYcpAKgM5ABXk4qSsdJaDOMCsgTIYAlL5TQFTyUIZDmev0N/bnwqnylEBQS45UKnHx/lUlFvA3fo+jwR8ALb47/oNma38cuqiJ9AAAAAASUVORK5CYII='
 file_icon = b'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAACXBIWXMAAAsSAAALEgHS3X78AAABU0lEQVQ4y52TzStEURiHn/ecc6XG54JSdlMkNhYWsiILS0lsJaUsLW2Mv8CfIDtr2VtbY4GUEvmIZnKbZsY977Uwt2HcyW1+dTZvt6fn9557BGB+aaNQKBR2ifkbgWR+cX13ubO1svz++niVTA1ArDHDg91UahHFsMxbKWycYsjze4muTsP64vT43v7hSf/A0FgdjQPQWAmco68nB+T+SFSqNUQgcIbN1bn8Z3RwvL22MAvcu8TACFgrpMVZ4aUYcn77BMDkxGgemAGOHIBXxRjBWZMKoCPA2h6qEUSRR2MF6GxUUMUaIUgBCNTnAcm3H2G5YQfgvccYIXAtDH7FoKq/AaqKlbrBj2trFVXfBPAea4SOIIsBeN9kkCwxsNkAqRWy7+B7Z00G3xVc2wZeMSI4S7sVYkSk5Z/4PyBWROqvox3A28PN2cjUwinQC9QyckKALxj4kv2auK0xAAAAAElFTkSuQmCC'
 
+# Set the PySimpleGUI theme and options
 sg.theme('DarkBlue3')
 sg.set_options(font=("Courier New", 12))
 
-# Define the layout with fields
+# Define the main GUI layout
 layout = [
     [sg.Text("Enter Numerical Value:"), sg.InputText(key="numerical_value")],
     [sg.Text("Distance Threshold (0-15):"), sg.Slider(range=(0, 15), default_value=0, orientation="h", key="threshold_slider")],
@@ -126,32 +135,30 @@ window = sg.Window('DocSpotter', layout)
 
 files = []
 
-# Loop identifying events
+# Loop to handle events
 while True:
     event, values = window.Read()
+
     if event == sg.WINDOW_CLOSED:
         break
     elif event == 'Browse':
-        files = popup_paths(path='C:/', width=80)
+        files = open_explorer(path='C:/', width=80)
         if files:
-            process_files(files)
+            print("Processing images..")
+            process_files(files) #TODO -> multithreading
+            print("Processing done, saving to json file.")
     elif event == 'Search':
-        # Check all fields
+        # Check if fields are valid 
         numerical_value = values["numerical_value"]
-        threshold_percentage = values["threshold_slider"]
-
         if not numerical_value or not is_float(numerical_value):
             sg.popup_error("Invalid input. Please enter a numerical value.")
-
-        if not files:
+        elif not files:
             sg.popup_error("You must choose atleast one file or folder.")
-
-        closest_values = find_closest_values(numerical_value, threshold_percentage)
-        
-        open_window(closest_values);
-        
-
-
-
+        else:
+            threshold_percentage = values["threshold_slider"]
+            closest_values = find_closest_values(numerical_value, threshold_percentage)
+            open_search_results(closest_values);
+    
+# Close the main window
 window.close()
 

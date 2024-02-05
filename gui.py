@@ -152,11 +152,11 @@ while True:
         files = open_explorer(path='C:/', width=80)
         if files:
             print("Processing images..")
-            window_process = show_processing_popup()  # Show the popup
+            window_process = show_processing_popup() 
             #import time
             #start_time = time.time()
             process_files(files)
-            window_process.close()  # Close the popup after processing is complete
+            window_process.close()  
             #print("--- %s seconds ---" % (time.time() - start_time))
             print("Processing done, saving to json file.")
     elif event == 'Search':
@@ -169,7 +169,8 @@ while True:
         else:
             threshold_percentage = values["threshold_slider"]
             closest_values = find_closest_values(numerical_value, threshold_percentage)
-            open_search_results(closest_values);
+            sorted_closest_values = sorted(closest_values, key=lambda x: x['distance'])
+            open_search_results(sorted_closest_values);
     
 # Close the main window
 window.close()

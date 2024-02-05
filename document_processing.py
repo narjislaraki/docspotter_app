@@ -114,41 +114,31 @@ def _process_single_file(path, temp_dir):
     return data
 
 def process_files(files):
+    """
+    Process a list of files, extracting text and saving information using multithreading.
+    """
+    temp_dir = "./temp"
+    os.makedirs(temp_dir, exist_ok=True)
     data = []
-    if not os.path.exists("./temp"):
-        os.makedirs("./temp")
-    print("Processing images..")
-    with open('document_information.json', 'w') as json_file:
 
-        for path in files:
-            full_path = os.path.abspath(path)
-            
-            if path.endswith((".jpg", ".jpeg", ".png", ".bmp")):
-                values, bboxes = _extract_and_save_information(full_path)
-                entry = _create_json_entry(full_path, values, bboxes)
-                data.append(entry)
+    # Flatten all files and directories into a list of files
+    all_files = []
+    for file_or_dir in files:
+        if os.path.isdir(file_or_dir):
+            for root, _, filenames in os.walk(file_or_dir):
+                for filename in filenames:
+                    all_files.append(os.path.join(root, filename))
+        else:
+            all_files.append(file_or_dir)
 
-            elif path.endswith('.pdf'):
-                pages = convert_from_path(full_path, 350)
-                i = 1
-                for page in pages:
-                    image_name = Path(path).stem + "_page_" + str(i) + ".jpg" 
-                    image_path = os.path.join("./temp/", image_name)
-                    page.save(image_path, "JPEG")
-                    values, bboxes = _extract_and_save_information(image_path)
-                    entry = _create_json_entry(image_path, values, bboxes)
-                    data.append(entry)
-                    i = i+1    
-            elif os.path.isdir(path):
-                    file_paths = [os.path.join(path, filename) for filename in os.listdir(path)]
-                    print(file_paths[0])
-                    process_files(file_paths)
-                    
-            else: 
-                pass
-        
-        print("Processing done, saving to json file.")
-        json.dump(data, json_file, indent=4)
+    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+        futures = [executor.submit(_process_single_file, file, temp_dir) for file in all_files]
+        for future in as_completed(futures):
+            data.extend(future.result())
+
+    if data:
+        with open('document_information.json', 'w') as json_file:
+            json.dump(data, json_file, indent=4)
 
 
 

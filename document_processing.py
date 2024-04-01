@@ -8,9 +8,12 @@ from pdf2image import convert_from_path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import pytesseract
 import Levenshtein
+import hashlib
+from docspotter import detect_text, skew_and_extract_text
 
 pytesseract.pytesseract.tesseract_cmd = r'E:\Program Files\Tesseract-OCR\tesseract.exe'
-
+TEMP_DIR = "./temp"
+CACHED_DIR = "./cached_files"
 
 # Utility Functions 
 
@@ -53,35 +56,35 @@ def resize_image_for_display(image_path, max_size=(700, 700)):
     """
     with Image.open(image_path) as img:
         img.thumbnail(max_size, Image.LANCZOS)
-        resized_image_path = f"./temp/{_get_image_name(image_path)}.png"
+        resized_image_path = f"{TEMP_DIR}/{_get_image_name(image_path)}.png"
         img.save(resized_image_path)
     return resized_image_path
+
+def calculate_files_hash(files_list):
+    """
+    Calculate a hash value based on the content of files list.
+    """
+    hasher = hashlib.sha256()
+    for file_path in files_list:
+        with open(file_path, 'rb') as file:
+            while True:
+                chunk = file.read(4096)
+                if not chunk:
+                    break
+                hasher.update(chunk)
+    return hasher.hexdigest()
     
 # Main OCR and Image Processing Functions
 
-def _extract_and_save_information(image_path):
+def _extract_and_save_information(craft_obj, image_path):
     """
     Extract words and calculate bounding boxes from an image.
     """
-
-    image = _preprocess_image(image_path)
-    d =  pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
-
-    # Extract words and bounding boxes
-    values = []
-    bboxes = []
-    # Iterate through the detected data
-    for i in range(len(d['text'])):
-        text_elem = d['text'][i].strip()
-        if text_elem:  # Check if the word is not empty
-            if _has_numbers(text_elem):
-                values.append(text_elem)
-                left, top, width, height = int(d['left'][i]), int(d['top'][i]), int(d['width'][i]), int(d['height'][i])
-                right, bottom = left + width, top + height
-                bboxes.append((left, top, right, bottom))
-            
-
-    return values, bboxes
+    image = cv2.imread(image_path)
+    prediction_result = detect_text(craft_obj, image)
+    values, rois = skew_and_extract_text(image, prediction_result)
+    serializable_rois = [roi.tolist() for roi in rois]
+    return values, serializable_rois
 
 
 def _create_json_entry(file_path, values, bboxes):
@@ -94,31 +97,31 @@ def _create_json_entry(file_path, values, bboxes):
     
     return entry
 
-def _process_single_file(path, temp_dir):
+def _process_single_file(craft_obj, path):
     """
     Process a single file, extracting text and saving information.
     """
     full_path = os.path.abspath(path)
     data = []
     if path.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', 'webp')):
-        values, bboxes = _extract_and_save_information(full_path)
+        values, bboxes = _extract_and_save_information(craft_obj, full_path)
         data.append(_create_json_entry(full_path, values, bboxes))
     elif path.lower().endswith('.pdf'):
         pages = convert_from_path(full_path, 350)
         for i, page in enumerate(pages, start=1):
             image_name = f"{_get_image_name(path)}_page_{i}.jpg"
-            image_path = os.path.join(temp_dir, image_name)
+            image_path = os.path.join(TEMP_DIR, image_name)
             page.save(image_path, "JPEG")
-            values, bboxes = _extract_and_save_information(image_path)
+            values, bboxes = _extract_and_save_information(craft_obj, image_path)
             data.append(_create_json_entry(image_path, values, bboxes))
     return data
 
-def process_files(files):
+def process_files(craft_obj, files):
     """
     Process a list of files, extracting text and saving information using multithreading.
     """
-    temp_dir = "./temp"
-    os.makedirs(temp_dir, exist_ok=True)
+    os.makedirs(TEMP_DIR, exist_ok=True)
+    os.makedirs(CACHED_DIR, exist_ok=True)
     data = []
 
     # Flatten all files and directories into a list of files
@@ -131,23 +134,30 @@ def process_files(files):
         else:
             all_files.append(file_or_dir)
 
-    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        futures = [executor.submit(_process_single_file, file, temp_dir) for file in all_files]
-        for future in as_completed(futures):
-            data.extend(future.result())
+    hash_result = calculate_files_hash(all_files)
+    filename = os.path.join(CACHED_DIR, f"{hash_result}.json")
 
-    if data:
-        with open('document_information.json', 'w') as json_file:
-            json.dump(data, json_file, indent=4)
+    if (os.path.exists(filename)):
+        print(f"File has already been processed. Currently located in {CACHED_DIR}/{hash_result}.json")
+    else:
+        with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+            futures = [executor.submit(_process_single_file, craft_obj, file) for file in all_files]
+            for future in as_completed(futures):
+                data.extend(future.result())
+
+        if data:
+            filename = os.path.join(CACHED_DIR, f"{hash_result}.json")
+            with open(filename, 'w') as json_file:
+                json.dump(data, json_file, indent=4)
+    
+    return filename
 
 
-
-def find_closest_values(user_input, threshold):
-    with open('document_information.json', 'r') as json_file:
+def find_closest_values(file_path, user_input, threshold):
+    with open(file_path, 'r') as json_file:
         data = json.load(json_file)
 
     closest_values = []
-
     for entry in data:
         for i, extracted_value in enumerate(entry['values']):
             distance = Levenshtein.distance(user_input, extracted_value)
@@ -167,9 +177,42 @@ def draw_bounding_boxes(selected_data):
     """
     path, value, bbox = selected_data['image_path'], selected_data['value'], selected_data['bounding_box']
     annotated_image = cv2.imread(path)
-    left, top, right, bottom = bbox
-    cv2.rectangle(annotated_image, (left, top), (right, bottom), (0, 0, 255), 2)
+    top_left = tuple(bbox[0])
+    bottom_right = tuple(bbox[2])
+    cv2.rectangle(annotated_image, top_left, bottom_right, (0, 0, 255), 2)
     new_image_path = f"./temp/{_get_image_name(path)}.png"
     cv2.imwrite(new_image_path, annotated_image)
 
     return new_image_path
+    """
+    # CODE FOR SVG GENERATION
+    image_name = _get_image_name(path)
+    img = Image.open(path)
+    width, height = img.size
+
+    # Extract bounding box coordinates
+    x1, y1 = bbox[0]  # Coordinates of the top-left corner
+    x2, y2 = bbox[2]  # Coordinates of the bottom-right corner
+
+    # Calculate SVG coordinates based on image dimensions and bounding box
+    x1_scaled = (x1 / width) * 100  
+    y1_scaled = (y1 / height) * 100  
+    x2_scaled = (x2 / width) * 100  
+    y2_scaled = (y2 / height) * 100  
+
+    # Generate SVG markup for rectangle
+    svg_markup = f\"""
+    <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+        <image href="{path}" width="100%" height="100%" />
+        <rect x="{x1_scaled}%" y="{y1_scaled}%" width="{x2_scaled - x1_scaled}%" height="{y2_scaled - y1_scaled}%" 
+              stroke="red" stroke-width="2" fill="none" />
+    </svg>
+    \"""
+
+    svg_filename = f"{TEMP_DIR}/{image_name}.svg"
+    with open(svg_filename, 'w') as svg_file:
+        svg_file.write(svg_markup)
+
+    return svg_filename
+    """
+

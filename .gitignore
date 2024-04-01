@@ -1,3 +1,4 @@
 temp/
+cached_files/
 document_information.json
 __pycache__/

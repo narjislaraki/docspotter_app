@@ -2,6 +2,7 @@
 from pathlib import Path
 import PySimpleGUI as sg
 from document_processing import *
+from docspotter import create_craft_detector
 
 ############################### GUI FUNCTIONS ############################### 
 
@@ -141,7 +142,8 @@ layout = [
 window = sg.Window('DocSpotter', layout)
 
 files = []
-
+craft_obj = create_craft_detector()
+file_path = ""
 # Loop to handle events
 while True:
     event, values = window.Read()
@@ -155,7 +157,7 @@ while True:
             window_process = show_processing_popup() 
             #import time
             #start_time = time.time()
-            process_files(files)
+            file_path = process_files(craft_obj, files)
             window_process.close()  
             #print("--- %s seconds ---" % (time.time() - start_time))
             print("Processing done, saving to json file.")
@@ -168,7 +170,7 @@ while True:
             sg.popup_error("You must choose atleast one file or folder.")
         else:
             threshold_percentage = values["threshold_slider"]
-            closest_values = find_closest_values(numerical_value, threshold_percentage)
+            closest_values = find_closest_values(file_path, numerical_value, threshold_percentage)
             sorted_closest_values = sorted(closest_values, key=lambda x: x['distance'])
             open_search_results(sorted_closest_values);
     

@@ -11,11 +11,13 @@ import Levenshtein
 import hashlib
 from docspotter import detect_text, skew_and_extract_text
 
+Image.MAX_IMAGE_PIXELS = None
 pytesseract.pytesseract.tesseract_cmd = r'E:\Program Files\Tesseract-OCR\tesseract.exe'
 TEMP_DIR = "./temp"
 CACHED_DIR = "./cached_files"
 
 # Utility Functions 
+
 
 def _get_image_name(path):
     return Path(path).stem
@@ -46,7 +48,19 @@ def _preprocess_image(image_path):
     image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
     return image
+"""
+def is_cluttered(image, max_contours=2000):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV+cv2.THRESH_OTSU)
+    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    print(len(contours))
+    return len(contours) > max_contours
 
+def is_blurry(image, threshold=100):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    blur_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+    return blur_var < threshold
+"""
 def resize_image_for_display(image_path, max_size=(700, 700)):
     """
     Resize an image to fit within a window, maintaining aspect ratio.
@@ -80,11 +94,19 @@ def _extract_and_save_information(craft_obj, image_path):
     """
     Extract words and calculate bounding boxes from an image.
     """
+
     image = cv2.imread(image_path)
-    prediction_result = detect_text(craft_obj, image)
-    values, rois = skew_and_extract_text(image, prediction_result)
-    serializable_rois = [roi.tolist() for roi in rois]
-    return values, serializable_rois
+    """
+    if (is_cluttered(image)):
+        print("cluttered")
+    """
+    if image is None:
+        print("Invalid Path. Does your path contain a special character ?")
+    else:
+        prediction_result = detect_text(craft_obj, image)
+        values, rois = skew_and_extract_text(image, prediction_result)
+        serializable_rois = [roi.tolist() for roi in rois]
+        return values, serializable_rois
 
 
 def _create_json_entry(file_path, values, bboxes):
@@ -109,8 +131,7 @@ def _process_single_file(craft_obj, path):
     elif path.lower().endswith('.pdf'):
         pages = convert_from_path(full_path, 350)
         for i, page in enumerate(pages, start=1):
-            image_name = f"{_get_image_name(path)}_page_{i}.jpg"
-            image_path = os.path.join(TEMP_DIR, image_name)
+            image_path = f"{TEMP_DIR}/{_get_image_name(path)}_page_{i}.jpg"
             page.save(image_path, "JPEG")
             values, bboxes = _extract_and_save_information(craft_obj, image_path)
             data.append(_create_json_entry(image_path, values, bboxes))
@@ -180,39 +201,10 @@ def draw_bounding_boxes(selected_data):
     top_left = tuple(bbox[0])
     bottom_right = tuple(bbox[2])
     cv2.rectangle(annotated_image, top_left, bottom_right, (0, 0, 255), 2)
-    new_image_path = f"./temp/{_get_image_name(path)}.png"
+    new_image_name = f"{_get_image_name(path)}.png"
+    new_image_path = os.path.join(TEMP_DIR, new_image_name)
+
     cv2.imwrite(new_image_path, annotated_image)
 
     return new_image_path
-    """
-    # CODE FOR SVG GENERATION
-    image_name = _get_image_name(path)
-    img = Image.open(path)
-    width, height = img.size
-
-    # Extract bounding box coordinates
-    x1, y1 = bbox[0]  # Coordinates of the top-left corner
-    x2, y2 = bbox[2]  # Coordinates of the bottom-right corner
-
-    # Calculate SVG coordinates based on image dimensions and bounding box
-    x1_scaled = (x1 / width) * 100  
-    y1_scaled = (y1 / height) * 100  
-    x2_scaled = (x2 / width) * 100  
-    y2_scaled = (y2 / height) * 100  
-
-    # Generate SVG markup for rectangle
-    svg_markup = f\"""
-    <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
-        <image href="{path}" width="100%" height="100%" />
-        <rect x="{x1_scaled}%" y="{y1_scaled}%" width="{x2_scaled - x1_scaled}%" height="{y2_scaled - y1_scaled}%" 
-              stroke="red" stroke-width="2" fill="none" />
-    </svg>
-    \"""
-
-    svg_filename = f"{TEMP_DIR}/{image_name}.svg"
-    with open(svg_filename, 'w') as svg_file:
-        svg_file.write(svg_markup)
-
-    return svg_filename
-    """
-
+    
